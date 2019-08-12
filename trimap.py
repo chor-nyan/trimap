@@ -19,6 +19,7 @@ import time
 import datetime
 import sys
 from sklearn.decomposition import PCA
+from skhubness.neighbors import kneighbors_graph
 
 if sys.version_info < (3,):
     range = xrange
@@ -210,16 +211,24 @@ def find_weights(triplets, P, nbrs, distances, sig):
         weights[t] = p_sim/p_out
     return weights
 
-def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weight_adj = True, verbose = True):
+def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weight_adj = True, verbose = True, hub = True):
     n, dim = X.shape
     if dim > 100:
         X = TruncatedSVD(n_components=100, random_state=0).fit_transform(X)
         dim = 100
     exact = n <= 10000
     n_extra = min(max(n_inlier, 150),n)
-    if exact: # do exact knn search
-        knn_tree = knn(n_neighbors= n_extra, algorithm='auto').fit(X)
+
+    if hub:
+        neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='distance', hubness='mutual_proximity',
+                                          hubness_params={'method': 'normal'})
+        nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
+        distances = neigbour_graph.data.reshape((X.shape[0], n_extra))
+
+    elif exact: # do exact knn search
+        knn_tree = knn(n_neighbors=n_extra, algorithm='auto').fit(X)
         distances, nbrs = knn_tree.kneighbors(X)
+        # print(nbrs)
     elif fast_trimap: # use annoy
         tree = AnnoyIndex(dim, metric='euclidean')
         for i in range(n):
@@ -263,6 +272,7 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
     if verbose:
         print("found nearest neighbors")
     sig = np.maximum(np.mean(distances[:, 10:20], axis=1), 1e-20) # scale parameter
+    print(distances.dtype, nbrs.dtype)
     P = find_p(distances, sig, nbrs)
     triplets = sample_knn_triplets(P, nbrs, n_inlier, n_outlier)
     n_triplets = triplets.shape[0]
