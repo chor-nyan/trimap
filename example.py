@@ -12,16 +12,28 @@ import trimap
 
 cols = cm.tab10(np.linspace(0, 1, 10))
 
-mnist = fetch_openml('mnist_784', version=1)
-X = mnist.data[:70000, :]
-L = mnist.target[:70000].astype(int)
-print("Dataset size = ({},{})".format(X.shape[0], X.shape[1]))
+X = np.load('./data/mnist_X.npy')
+L = np.load('./data/mnist_L.npy').flatten()
+print("Dataset size = ({},{})".format(X.shape[0],X.shape[1]))
 
-# y_pca = PCA(n_components = 2).fit_transform(X)
-# y_tsne = TSNE().fit_transform(X)
-# y_umap = umap.UMAP().fit_transform(X)
-y_trimap = trimap.TRIMAP(verbose=False).fit_transform(X)
 
-# plot_results([y_tsne,y_umap,y_trimap,y_pca], cols[L,:], extension='(orig)')
-plt.scatter(y_trimap[:,0], y_trimap[:,1], s=0.1, c=cols[L,:])
+# y_trimap = trimap.TRIMAP(verbose=True).fit_transform(X)
+
+# Outlier
+index = 9423
+c = np.random.normal(size=X.shape[1]) # create a random direction
+Xo = X.copy()
+Xo[index,:] += 5.0 * c
+
+yo_trimap = trimap.TRIMAP(verbose=True, hub='ls').fit_transform(Xo)
+
+
+
+
+plt.scatter(yo_trimap[:,0], yo_trimap[:,1], s=0.1, c=cols[L,:])
+plt.scatter(yo_trimap[index,0], yo_trimap[index,1], s=80, c='red', marker='x')
 plt.show()
+
+# flag = [True] * Xo.shape[0]
+# flag[index] = False
+# plt.scatter(yo_trimap[flag,0], yo_trimap[flag,1], s=0.1, c=cols[L[flag],:])

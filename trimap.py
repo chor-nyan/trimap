@@ -211,7 +211,7 @@ def find_weights(triplets, P, nbrs, distances, sig):
         weights[t] = p_sim/p_out
     return weights
 
-def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weight_adj = True, verbose = True, hub = True):
+def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weight_adj = True, verbose = True, hub = 'mp'):
     n, dim = X.shape
     if dim > 100:
         X = TruncatedSVD(n_components=100, random_state=0).fit_transform(X)
@@ -219,11 +219,21 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
     exact = n <= 10000
     n_extra = min(max(n_inlier, 150),n)
 
-    if hub:
+    if hub == 'mp':
         neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='distance', hubness='mutual_proximity',
                                           hubness_params={'method': 'normal'})
         nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
         distances = neigbour_graph.data.reshape((X.shape[0], n_extra))
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
+    if hub == 'ls':
+        neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='distance', hubness='local_scaling')
+        nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
+        distances = neigbour_graph.data.reshape((X.shape[0], n_extra))
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
 
     elif exact: # do exact knn search
         knn_tree = knn(n_neighbors=n_extra, algorithm='auto').fit(X)
@@ -271,9 +281,16 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
             distances[i,:n_unique] = dij[sort_indices]
     if verbose:
         print("found nearest neighbors")
-    sig = np.maximum(np.mean(distances[:, 10:20], axis=1), 1e-20) # scale parameter
-    print(distances.dtype, nbrs.dtype)
+    if hub == 'ls':
+        sig = np.array([1.]*X.shape[0])
+    else:
+        sig = np.maximum(np.mean(distances[:, 10:20], axis=1), 1e-20) # scale parameter
+    # print(distances.dtype, nbrs.dtype)
     P = find_p(distances, sig, nbrs)
+    if hub == 'ls':
+        P = -np.log(P)
+        P = np.sqrt(P)
+        P = 1 - P
     triplets = sample_knn_triplets(P, nbrs, n_inlier, n_outlier)
     n_triplets = triplets.shape[0]
     outlier_dist = np.empty(n_triplets, dtype=np.float64)
@@ -377,7 +394,7 @@ def trimap_grad(Y, n_inlier, n_outlier, triplets, weights):
     
     
 def trimap(X, triplets, weights, n_dims, n_inliers, n_outliers, n_random, lr, n_iters, Yinit,
- weight_adj, fast_trimap, opt_method, verbose, return_seq):
+ weight_adj, fast_trimap, opt_method, verbose, return_seq, hub):
     if verbose:
         t = time.time()
     n, dim = X.shape
@@ -389,7 +406,7 @@ def trimap(X, triplets, weights, n_dims, n_inliers, n_outliers, n_random, lr, n_
         X -= np.min(X)
         X /= np.max(X)
         X -= np.mean(X,axis=0)
-        triplets, weights = generate_triplets(X, n_inliers, n_outliers, n_random, fast_trimap, weight_adj, verbose)
+        triplets, weights = generate_triplets(X, n_inliers, n_outliers, n_random, fast_trimap, weight_adj, verbose, hub)
         if verbose:
             print("sampled triplets")
     else:
@@ -500,7 +517,8 @@ class TRIMAP(BaseEstimator):
                  weight_adj=True,
                  fast_trimap=True,
                  opt_method='dbd',
-                 return_seq=False
+                 return_seq=False,
+                 hub='mp'
                  ):
         self.n_dims = n_dims
         self.n_inliers = n_inliers
@@ -515,6 +533,7 @@ class TRIMAP(BaseEstimator):
         self.opt_method = opt_method
         self.verbose = verbose
         self.return_seq = return_seq
+        self.hub = hub
 
         if self.n_dims < 2:
             raise ValueError('The number of output dimensions must be at least 2.')
@@ -529,8 +548,8 @@ class TRIMAP(BaseEstimator):
 
         if self.verbose:
             print("TRIMAP(n_inliers={}, n_outliers={}, n_random={}, "
-                  "lr={}, n_iters={}, weight_adj={}, fast_trimap = {}, opt_method = {}, verbose={}, return_seq={})".format(
-                  n_inliers, n_outliers, n_random, lr, n_iters, weight_adj, fast_trimap, opt_method, verbose, return_seq))
+                  "lr={}, n_iters={}, weight_adj={}, fast_trimap = {}, opt_method = {}, verbose={}, return_seq={}, hub={})".format(
+                  n_inliers, n_outliers, n_random, lr, n_iters, weight_adj, fast_trimap, opt_method, verbose, return_seq, hub))
             if not self.fast_trimap:
                 print(bold + "running exact nearest neighbors search. TriMap may be slow!" + reset)
 
@@ -549,7 +568,7 @@ class TRIMAP(BaseEstimator):
         
         self.embedding_, self.triplets, self.weights = trimap(X, self.triplets,
             self.weights, self.n_dims, self.n_inliers, self.n_outliers, self.n_random,
-            self.lr, self.n_iters, init, self.weight_adj, self.fast_trimap, self.opt_method, self.verbose, self.return_seq)
+            self.lr, self.n_iters, init, self.weight_adj, self.fast_trimap, self.opt_method, self.verbose, self.return_seq, self.hub)
         return self
 
     def fit_transform(self, X, init = None):
@@ -581,7 +600,7 @@ class TRIMAP(BaseEstimator):
         X -= np.min(X)
         X /= np.max(X)
         X -= np.mean(X,axis=0)
-        self.triplets, self.weights = generate_triplets(X, self.n_inliers, self.n_outliers, self.n_random, self.fast_trimap, self.weight_adj, self.verbose)
+        self.triplets, self.weights = generate_triplets(X, self.n_inliers, self.n_outliers, self.n_random, self.fast_trimap, self.weight_adj, self.verbose, self.hub)
         if self.verbose:
             print("sampled triplets")
         
