@@ -20,6 +20,9 @@ import datetime
 import sys
 from sklearn.decomposition import PCA
 from skhubness.neighbors import kneighbors_graph
+import hub_toolbox
+from hub_toolbox.distances import euclidean_distance
+from skhubness.reduction import shared_neighbors
 
 if sys.version_info < (3,):
     range = xrange
@@ -37,6 +40,36 @@ def euclid_dist(x1, x2):
     for i in range(x1.shape[0]):
         result += (x1[i]-x2[i])**2
     return np.sqrt(result)
+
+@numba.jit()
+def make_mutual(neighbour_matrix):
+    for i in range(neighbour_matrix.shape[0]):
+        for j in range(neighbour_matrix.shape[1]):
+            if i not in neighbour_matrix[neighbour_matrix[i, j]]:
+                neighbour_matrix[i, j] = neighbour_matrix.shape[0] + 1
+    return neighbour_matrix
+
+# Define KNN graph information function
+@numba.jit()
+def KNN_Info(D, k, geodesic=None):
+    (n, _) = D.shape
+    sortD = np.zeros((n, k), )
+    sortD_idx = np.zeros((n, k), dtype=int)
+
+    for i in np.arange(0, n):
+        d_vec = D[i, :]  # i-th row
+        v = np.argsort(d_vec)  # 昇順にソートした配列のインデックス
+        sortD_idx[i, :] = v[1:k + 1]  # 距離が短い順にk個選ぶ（自分を除く）
+        sortD[i, :] = d_vec[sortD_idx[i, :]]
+
+    deg = np.zeros((1, n), dtype=int)
+    v = sortD_idx.reshape(1, n * k)
+    for i in np.arange(0, n):
+        (_, v0) = np.where(v == i)  # vは二次元配列で, タプルの1つめの要素はすべて0になる
+        deg[:, i] = len(v0)
+
+    return sortD, sortD_idx
+
 
 @numba.njit()
 def rejection_sample(n_samples, max_int, rejects):
@@ -102,8 +135,9 @@ def sample_knn_triplets(P, nbrs, n_inlier, n_outlier):
 
 
 
-@numba.njit('f8[:,:](f8[:,:],i8,f8[:])', parallel=True, nogil=True)
-def sample_random_triplets(X, n_random, sig):
+# @numba.njit('f8[:,:](f8[:,:],i8,f8[:])', parallel=True, nogil=True)
+@numba.jit()
+def sample_random_triplets(X, n_random, sig=None, P=None):
     """
     Sample uniformly random triplets
 
@@ -131,10 +165,20 @@ def sample_random_triplets(X, n_random, sig):
             out = np.random.choice(n)
             while out == i or out == sim:
                 out = np.random.choice(n)
-            p_sim = np.exp(-euclid_dist(X[i,:],X[sim,:])**2/(sig[i] * sig[sim]))
+
+            if not sig is None:
+                p_sim = np.exp(-euclid_dist(X[i,:],X[sim,:])**2/(sig[i] * sig[sim]))
+            elif not P is None:
+                p_sim = P[i, sim]
+
             if p_sim < 1e-20:
                 p_sim = 1e-20
-            p_out = np.exp(-euclid_dist(X[i,:],X[out,:])**2/(sig[i] * sig[out]))
+
+            if not sig is None:
+                p_out = np.exp(-euclid_dist(X[i,:],X[out,:])**2/(sig[i] * sig[out]))
+            elif not P is None:
+                p_out = P[i, out]
+
             if p_out < 1e-20:
                 p_out = 1e-20
             if p_sim < p_out:
@@ -200,9 +244,9 @@ def find_weights(triplets, P, nbrs, distances, sig):
     n_triplets = triplets.shape[0]
     weights = np.empty(n_triplets, dtype=np.float64)
     for t in range(n_triplets):
-        i = triplets[t,0]
+        i = triplets[t, 0]
         sim = 0
-        while(nbrs[i,sim] != triplets[t,1]):
+        while(nbrs[i, sim] != triplets[t,1]):
             sim += 1
         p_sim = P[i,sim]
         p_out = np.exp(-distances[t]**2/(sig[i] * sig[triplets[t,2]]))
@@ -219,18 +263,121 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
     exact = n <= 10000
     n_extra = min(max(n_inlier, 150),n)
 
-    if hub == 'mp':
+    if hub == 'mp1':  # hubness reductionをtriplet選択のみに使用
+        neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='distance', hubness='mutual_proximity',
+                                          hubness_params={'method': 'normal'})
+        nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
+        # distances = neigbour_graph.data.reshape((X.shape[0], n_extra))
+
+        flag = nbrs.tolist()
+
+        D = euclidean_distance(X)
+        D = np.array([D[i][flag[i]] for i in range(D.shape[0])])
+
+        distances = D
+
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
+    elif hub == 'mp2':  # 類似度Pを１−Dmpにする
+
+        D = euclidean_distance(X)
+        D_mp = hub_toolbox.global_scaling.mutual_proximity_gaussi(D=D, metric='distance')
+
+        # make knn graph
+        distances, nbrs = KNN_Info(D_mp, n_extra)
+
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
+    elif hub == 'mp3':  # secondary distanceで類似度を計算
+        D = euclidean_distance(X)
+        D_mp = hub_toolbox.global_scaling.mutual_proximity_gaussi(D=D, metric='distance')
+
+        # make knn graph
+        distances, nbrs = KNN_Info(D_mp, n_extra)
+
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
+    elif hub == 'mp4mp4':  # 謎
         neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='distance', hubness='mutual_proximity',
                                           hubness_params={'method': 'normal'})
         nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
         distances = neigbour_graph.data.reshape((X.shape[0], n_extra))
+
         if verbose:
             print("hubness reduction with {}".format(hub))
 
-    if hub == 'ls':
+
+
+    elif hub == 'ls1':
         neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='distance', hubness='local_scaling')
         nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
-        distances = neigbour_graph.data.reshape((X.shape[0], n_extra))
+        # distances = neigbour_graph.data.reshape((X.shape[0], n_extra))
+
+        flag = nbrs.tolist()
+
+        D = euclidean_distance(X)
+        D = np.array([D[i][flag[i]] for i in range(D.shape[0])])
+
+        distances = D
+
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
+    elif hub == 'ls2':
+        D = euclidean_distance(X)
+        D_ls = hub_toolbox.local_scaling.local_scaling(D=D, k=10, metric='distance')
+
+        # make knn graph
+        distances, nbrs = KNN_Info(D_ls, n_extra)
+
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
+    elif hub == 'dsl':
+        neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='connectivity', hubness='dsl')
+        nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
+        # flag = neigbour_graph.data.reshape((X.shape[0], n_extra))
+        flag = nbrs.tolist()
+
+        D = euclidean_distance(X)
+        D = np.array([D[i][flag[i]] for i in range(D.shape[0])])
+
+        distances = D
+
+        # D = np.empty((X.shape[0], n_extra, dtype=np.float64)
+        # for i in range(X.shape[0]):
+        #     for j in range(n_extra):
+        #         D[i, j] = euclid_dist(X[i, :], X[nbrs[i][j]])
+        #         np.sqrt(np.sum((X[triplets[t, 0], :] - X[triplets[t, 2], :]) ** 2))
+
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
+    elif hub == 'mutual':
+        # D = euclidean_distance(X)
+        # # make knn graph
+        # _, nbrs = KNN_Info(D_mp, n_extra)
+
+        knn_tree = knn(n_neighbors=n_extra, algorithm='auto').fit(X)
+        distances, nbrs = knn_tree.kneighbors(X)
+
+        nbrs = make_mutual(nbrs)
+        # a = nbrs == X.shape[0] + 1
+        # print(a)
+
+    elif hub == 'SNN1' or hub == 'SNN2':
+        D = euclidean_distance(X)
+        D_snn = hub_toolbox.shared_neighbors.shared_nearest_neighbors(D=D, metric='distance')
+
+        # snn = shared_neighbors(k=10, metric='euclidean')
+        # D_snn = snn.fit_tr(X)
+
+        # make knn graph
+        distances, nbrs = KNN_Info(D_snn, n_extra)
+
         if verbose:
             print("hubness reduction with {}".format(hub))
 
@@ -238,6 +385,7 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
     elif exact: # do exact knn search
         knn_tree = knn(n_neighbors=n_extra, algorithm='auto').fit(X)
         distances, nbrs = knn_tree.kneighbors(X)
+
         # print(nbrs)
     elif fast_trimap: # use annoy
         tree = AnnoyIndex(dim, metric='euclidean')
@@ -281,29 +429,86 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
             distances[i,:n_unique] = dij[sort_indices]
     if verbose:
         print("found nearest neighbors")
-    if hub == 'ls':
-        sig = np.array([1.]*X.shape[0])
+    # if hub == 'ls':
+    # #     sig = np.array([1.]*X.shape[0])
+    # else:
+    if hub == 'mp2':
+        P = 1 - distances  # (n, k)
+
+    # elif hub == 'mp3':
+    #     sig = np.median(D_mp[np.triu_indices(D_mp.shape[0], k=1)])
+    #     sig = np.array([sig] * D_mp.shape[0])
+    #     P = find_p(distances, sig, nbrs)
+
     else:
         sig = np.maximum(np.mean(distances[:, 10:20], axis=1), 1e-20) # scale parameter
-    # print(distances.dtype, nbrs.dtype)
-    P = find_p(distances, sig, nbrs)
-    if hub == 'ls':
-        P = -np.log(P)
-        P = np.sqrt(P)
-        P = 1 - P
+        P = find_p(distances, sig, nbrs)
+    # if hub == 'ls':
+    #     P = -np.log(P)
+    #     P = np.sqrt(P)
+    #     P = 1 - P
     triplets = sample_knn_triplets(P, nbrs, n_inlier, n_outlier)
+    print("tri_shape", triplets[0], triplets[0][2])
     n_triplets = triplets.shape[0]
+    # if hub == 'mp':
+    #     outlier_dist
+
+    # if not hub == 'mp':
+    #
     outlier_dist = np.empty(n_triplets, dtype=np.float64)
-    if exact or  not fast_trimap:
+    # if hub == 'mp':
+    #     for t in range(n_triplets):
+    #         outlier_dist[t] = D_mp[triplets[t][0], triplets[t][2]]
+    # el
+
+    if hub == 'mp2' or hub == 'SNN1' or hub == 'ls2':
+        pass
+
+    elif hub == 'mp3':
+        for t in range(n_triplets):
+            outlier_dist[t] = D_mp[triplets[t][0], triplets[t][2]]
+
+    elif hub == 'SNN2':
+        for t in range(n_triplets):
+            outlier_dist[t] = D_snn[triplets[t][0], triplets[t][2]]
+
+    elif exact or  not fast_trimap:
         for t in range(n_triplets):
             outlier_dist[t] = np.sqrt(np.sum((X[triplets[t,0],:] - X[triplets[t,2],:])**2))
     else:
         for t in range(n_triplets):
             outlier_dist[t] = euclid_dist(X[triplets[t,0],:], X[triplets[t,2],:])
             # outlier_dist[t] = tree.get_distance(triplets[t,0], triplets[t,2])
-    weights = find_weights(triplets, P, nbrs, outlier_dist, sig)
+
+    if hub == 'mp2' or hub == 'SNN1' or hub == 'ls2':
+        if hub == 'SNN1':
+            D_mp = D_snn
+        elif hub == 'ls2':
+            D_mp = D_ls
+
+        n_triplets = triplets.shape[0]
+        weights = np.empty(n_triplets, dtype=np.float64)
+        print("P and triplets' shape", triplets)
+        P = 1 - D_mp  # (n, n)
+        for t in range(n_triplets):
+            i = triplets[t, 0]
+            p_sim = P[i, triplets[t, 1]]
+            p_out = P[i, triplets[t, 2]]
+            if p_out < 1e-20:
+                p_out = 1e-20
+            weights[t] = p_sim / p_out
+    else:
+        weights = find_weights(triplets, P, nbrs, outlier_dist, sig)
+
+    print('out_dist: ', outlier_dist)
+
     if n_random > 0:
-        rand_triplets = sample_random_triplets(X, n_random, sig)
+        if hub == 'mp2' or hub == 'SNN1' or hub == 'ls2':
+            rand_triplets = sample_random_triplets(X, n_random, P=P)  # P: (n, n)
+
+        else:
+            rand_triplets = sample_random_triplets(X, n_random, sig=sig)
+
         rand_weights = rand_triplets[:,-1]
         rand_triplets = rand_triplets[:,:-1].astype(np.int64)
         triplets = np.vstack((triplets, rand_triplets))
