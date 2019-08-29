@@ -70,6 +70,21 @@ def KNN_Info(D, k, geodesic=None):
 
     return sortD, sortD_idx
 
+@numba.jit()
+def calculate_deg(nbrs):
+    n = nbrs.shape[0]
+    deg = np.array([0] * n)
+    v = nbrs.reshape(1, n * nbrs.shape[1])
+    for i in range(n):
+        (_, v0) = np.where(v == i)
+        deg[i] = len(v0)
+
+    mean_deg = np.mean(deg)
+    var_deg = np.var(deg)
+
+    return deg, mean_deg, var_deg
+
+
 
 @numba.njit()
 def rejection_sample(n_samples, max_int, rejects):
@@ -292,7 +307,7 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
 
     elif hub == 'mp3':  # secondary distanceで類似度を計算
         D = euclidean_distance(X)
-        D_mp = hub_toolbox.global_scaling.mutual_proximity_gaussi(D=D, metric='distance')
+        D_mp = hub_toolbox.global_scaling._mutual_proximity_empiric_full(D=D, metric='distance')
 
         # make knn graph
         distances, nbrs = KNN_Info(D_mp, n_extra)
@@ -499,6 +514,26 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
             weights[t] = p_sim / p_out
     else:
         weights = find_weights(triplets, P, nbrs, outlier_dist, sig)
+
+
+    if hub == 'weight':
+        deg, mean_deg, var_deg = calculate_deg(nbrs)
+        var_deg = max(var_deg, 1e-20)
+        # hubness_score = (deg - mean_deg) / var_deg
+        # hs_med = np.mean(hubness_score)
+        hs_med = np.median(deg)
+        hub_weights = np.exp(- deg/hs_med)
+        # hub_weights = np.exp(- hubness_score)
+
+        # print(hubness_score)
+
+        m = hub_weights.shape[0]
+        l = n_inlier * n_outlier
+
+        for i in range(m):
+            for j in range(l):
+                weights[i * l:i * l + j] = hub_weights[i] * weights[i * l:i * l + j]
+
 
     print('out_dist: ', outlier_dist)
 
