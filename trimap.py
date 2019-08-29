@@ -305,7 +305,17 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
         if verbose:
             print("hubness reduction with {}".format(hub))
 
-    elif hub == 'mp3':  # secondary distanceで類似度を計算
+    elif hub == 'mp3_gauss':  # secondary distanceで類似度を計算
+        D = euclidean_distance(X)
+        D_mp = hub_toolbox.global_scaling.mutual_proximity_gaussi(D=D, metric='distance')
+
+        # make knn graph
+        distances, nbrs = KNN_Info(D_mp, n_extra)
+
+        if verbose:
+            print("hubness reduction with {}".format(hub))
+
+    elif hub == 'mp3_emp':  # secondary distanceで類似度を計算
         D = euclidean_distance(X)
         D_mp = hub_toolbox.global_scaling._mutual_proximity_empiric_full(D=D, metric='distance')
 
@@ -315,7 +325,7 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
         if verbose:
             print("hubness reduction with {}".format(hub))
 
-    elif hub == 'mp4mp4':  # 謎
+    elif hub == 'mp4':  # 謎
         neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='distance', hubness='mutual_proximity',
                                           hubness_params={'method': 'normal'})
         nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
@@ -479,7 +489,7 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
     if hub == 'mp2' or hub == 'SNN1' or hub == 'ls2':
         pass
 
-    elif hub == 'mp3':
+    elif 'mp3' in hub:
         for t in range(n_triplets):
             outlier_dist[t] = D_mp[triplets[t][0], triplets[t][2]]
 

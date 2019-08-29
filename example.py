@@ -30,8 +30,8 @@ L = np.load('./data/mnist_L.npy').flatten()
 # X = X / 255.
 # L = L[:10000]
 
-X = X[:10000]
-L = L[:10000].astype(int)
+X = X[:1000]
+L = L[:1000].astype(int)
 print("Dataset size = ({},{})".format(X.shape[0], X.shape[1]))
 
 
@@ -43,7 +43,7 @@ print("Dataset size = ({},{})".format(X.shape[0], X.shape[1]))
 Xo = X.copy()
 # Xo[index,:] += 5.0 * c
 
-yo_trimap = trimap.TRIMAP(verbose=True, hub='mp3').fit_transform(Xo)
+yo_trimap = trimap.TRIMAP(verbose=True, hub='mp3_emp').fit_transform(Xo)
 # yo_trimap = umap.UMAP().fit_transform(X)
 
 plt.scatter(yo_trimap[:, 0], yo_trimap[:, 1], s=0.1, c=cols[L, :])
