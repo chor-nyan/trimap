@@ -69,7 +69,7 @@ def calculate_AUC(X, embed):
     sortD_embed, sortD_embed_idx = sort_D(D_embed, k=100)  # n×100-matrix
     n_precision = np.zeros((n, len(k_i)), dtype=float)  # precision
     n_recall = np.zeros((n, len(k_i)), dtype=float)  # recall
-    print(n_precision.shape, n_recall.shape)
+    # print(n_precision.shape, n_recall.shape)
     for i in range(n):
         for j in range(100):
             tp = np.intersect1d(sortD_X_idx[i, :], sortD_embed_idx[i, :j + 1])

@@ -23,6 +23,7 @@ from skhubness.neighbors import kneighbors_graph
 import hub_toolbox
 from hub_toolbox.distances import euclidean_distance
 from skhubness.reduction import shared_neighbors
+from hub_toolbox.approximate import SuQHR
 
 if sys.version_info < (3,):
     range = xrange
@@ -278,6 +279,19 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
     exact = n <= 10000
     n_extra = min(max(n_inlier, 150),n)
 
+    # if hub == 'mp_app':
+    #     # D = euclidean_distance(X)
+    #     n = X.shape[0]
+    #     D_mp = SuQHR(n_samples=n-1).fit_transform(X)
+    #     print("kjk", D_mp.shape)
+    #
+    #     # make knn graph
+    #     distances, nbrs = KNN_Info(D_mp, n_extra)
+    #
+    #     if verbose:
+    #         print("hubness reduction with {}".format(hub))
+
+
     if hub == 'mp1':  # hubness reductionをtriplet選択のみに使用
         neigbour_graph = kneighbors_graph(X, n_neighbors=n_extra, mode='distance', hubness='mutual_proximity',
                                           hubness_params={'method': 'normal'})
@@ -489,7 +503,7 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
     if hub == 'mp2' or hub == 'SNN1' or hub == 'ls2':
         pass
 
-    elif 'mp3' in hub:
+    elif hub == 'mp3_gauss' or hub == 'mp3_emp':
         for t in range(n_triplets):
             outlier_dist[t] = D_mp[triplets[t][0], triplets[t][2]]
 

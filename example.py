@@ -18,20 +18,22 @@ from sklearn.neighbors import KNeighborsClassifier
 cols = cm.tab10(np.linspace(0, 1, 10))
 
 # (X, L), (_, _) = keras.datasets.fashion_mnist.load_data()
-#
-X = np.load('./data/mnist_X.npy')
-L = np.load('./data/mnist_L.npy').flatten()
 
-# mnist = fetch_openml('mnist_784', version=1,)
-# X = mnist.data
-# L = mnist.target
+# X = np.load('./data/mnist_X.npy')
+# L = np.load('./data/mnist_L.npy').flatten()
+
+n = 30000
+
+mnist = fetch_openml('mnist_784', version=1,)
+X = mnist.data
+L = mnist.target
 
 # X = X[:10000].reshape((10000, 28*28))
 # X = X / 255.
 # L = L[:10000]
 
-X = X[:1000]
-L = L[:1000].astype(int)
+X = X[:n]
+L = L[:n].astype(int)
 print("Dataset size = ({},{})".format(X.shape[0], X.shape[1]))
 
 
@@ -40,10 +42,10 @@ print("Dataset size = ({},{})".format(X.shape[0], X.shape[1]))
 # # Outlier
 # index = 9423
 # c = np.random.normal(size=X.shape[1]) # create a random direction
-Xo = X.copy()
+# Xo = X.copy()
 # Xo[index,:] += 5.0 * c
 
-yo_trimap = trimap.TRIMAP(verbose=True, hub='mp3_emp').fit_transform(Xo)
+yo_trimap = trimap.TRIMAP(verbose=True, hub=None).fit_transform(X)
 # yo_trimap = umap.UMAP().fit_transform(X)
 
 plt.scatter(yo_trimap[:, 0], yo_trimap[:, 1], s=0.1, c=cols[L, :])
@@ -57,14 +59,13 @@ plt.show()
 # plt.show()
 
 # AUC
-auc = calculate_AUC(Xo, yo_trimap)
+auc = calculate_AUC(X, yo_trimap)
 print("AUC: ", auc)
 
 # 1-NN
 X_train, X_test, Y_train, Y_test = train_test_split(yo_trimap, L, random_state=0)
 knc = KNeighborsClassifier(n_neighbors=1)
 knc.fit(X_train, Y_train)
-
 Y_pred = knc.predict(X_test)
 score = knc.score(X_test, Y_test)
 print("1-NN: ", score)
