@@ -22,7 +22,7 @@ cols = cm.tab10(np.linspace(0, 1, 10))
 # X = np.load('./data/mnist_X.npy')
 # L = np.load('./data/mnist_L.npy').flatten()
 
-n = 30000
+n = 20000
 
 mnist = fetch_openml('mnist_784', version=1,)
 X = mnist.data
@@ -45,7 +45,7 @@ print("Dataset size = ({},{})".format(X.shape[0], X.shape[1]))
 # Xo = X.copy()
 # Xo[index,:] += 5.0 * c
 
-yo_trimap = trimap.TRIMAP(verbose=True, hub=None).fit_transform(X)
+yo_trimap = trimap.TRIMAP(verbose=True, hub='mp3_gauss').fit_transform(X)
 # yo_trimap = umap.UMAP().fit_transform(X)
 
 plt.scatter(yo_trimap[:, 0], yo_trimap[:, 1], s=0.1, c=cols[L, :])

@@ -24,6 +24,8 @@ import hub_toolbox
 from hub_toolbox.distances import euclidean_distance
 from skhubness.reduction import shared_neighbors
 from hub_toolbox.approximate import SuQHR
+import gc
+from sklearn.neighbors import kneighbors_graph as sknn
 
 if sys.version_info < (3,):
     range = xrange
@@ -323,8 +325,15 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
         D = euclidean_distance(X)
         D_mp = hub_toolbox.global_scaling.mutual_proximity_gaussi(D=D, metric='distance')
 
+        del D
+        gc.collect()
+
         # make knn graph
         distances, nbrs = KNN_Info(D_mp, n_extra)
+
+        # neigbour_graph = sknn(X, n_neighbors=n_extra, mode='distance')
+        # nbrs = neigbour_graph.indices.astype(int).reshape((X.shape[0], n_extra))
+        # distances = neigbour_graph.data.reshape((X.shape[0], n_extra))
 
         if verbose:
             print("hubness reduction with {}".format(hub))
@@ -334,7 +343,8 @@ def generate_triplets(X, n_inlier, n_outlier, n_random, fast_trimap = True, weig
         D_mp = hub_toolbox.global_scaling._mutual_proximity_empiric_full(D=D, metric='distance')
 
         # make knn graph
-        distances, nbrs = KNN_Info(D_mp, n_extra)
+        # distances, nbrs = KNN_Info(D_mp, n_extra)
+        neigbour_graph = k
 
         if verbose:
             print("hubness reduction with {}".format(hub))
